@@ -1,0 +1,7 @@
+region	product	units	revenue	shipped
+North	Widget	1200	$14,400.00	2026-03-01
+South	Gadget	85	$2,125.50	2026-03-04
+North	Gadget	310	$7,750.00	2026-03-09
+East	Widget	42	$504.00	
+West	Gizmo	2500	$61,250.75	2026-03-15
+South	Widget	0	$0.00	2026-03-20

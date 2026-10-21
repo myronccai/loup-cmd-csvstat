@@ -1,0 +1,123 @@
+#!/usr/bin/env -S loup run
+@mode(host.scripted)
+
+# csvstat: print descriptive statistics for each column of a CSV file, like
+# csvkit's csvstat, with a csvlook-style table view (--look).
+#
+# Runtime: host.scripted. The program's entry point: the Loup scripted
+# runtime interprets this file from source (`loup run bin/csvstat.lpscr --
+# ARGS`, as `make run`, tests/e2e.sh and CI do; on Linux x86-64 that is the
+# self-hosted driver). Its top-level statements run in order and there is no
+# compile step: a script entry cannot be compiled, so the project has no
+# binary. `make check` type-checks it, with every lib/ module it imports,
+# using Stage0 (`loup-bootstrap check`). Long options must follow `--`:
+# `loup run` drops a `--long` word that comes before it.
+#
+# Structure: this script is the top level, the only code that reads files,
+# prints and sets the exit status. It parses the command line (usage errors
+# exit 2), handles --help and --version, reads the input, builds the table
+# (malformed CSV exits 1), handles -n and --count, selects the columns
+# (invalid ones exit 1), infers and describes each column and prints the
+# chosen report.
+
+from io.fs import (isDir);
+from ..lib.appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
+from ..lib.options import (Options, parse_args);
+from ..lib.usage import (usage, version_line);
+from ..lib.console import (Console, make_console);
+from ..lib.reader import (CsvError, Table, read_table);
+from ..lib.columns import (select_columns);
+from ..lib.infer import (null_set, infer_column, type_name);
+from ..lib.stats import (ColumnStats, describe);
+from ..lib.report import (render_text, render_one, render_csv, render_look, render_names, stats_table);
+from ..lib.report_json import (render_json);
+
+# Reports a failure and ends the program with status 1. To the checker
+# exit() is an ordinary call, so `unreachable` closes the path.
+func fail(message: string): noreturn {
+    printErr(i"{$ APP_NAME $}: {$ message $}");
+    exit(EXIT_FAILURE);
+    unreachable;
+}
+
+# The input as a table; a malformed record ends the program.
+func load_table(text: string, opts: Options, source: string, log: Console): Table {
+    try {
+        return read_table(text, log, delimiter = opts.delimiter, no_header = opts.no_header,
+            skip_lines = opts.skip_lines, source = source);
+    } catch (CsvError as e) {
+        let place = if (e.column > 0) { str(e.line) + ":" + str(e.column) } else { str(e.line) };
+        fail(i"{$ source $}:{$ place $}: {$ e.reason $}");
+    }
+}
+
+let parsed = parse_args(args());
+if (parsed.is_err()) {
+    printErr(i"{$ APP_NAME $}: {$ parsed.unwrap_err() $}");
+    printErr(i"Try '{$ APP_NAME $} --help' for more information.");
+    exit(EXIT_USAGE);
+}
+let opts: Options = parsed.unwrap();
+if (opts.help) {
+    println(usage());
+    exit(EXIT_OK);
+}
+if (opts.version) {
+    println(version_line());
+    exit(EXIT_OK);
+}
+let log = make_console(opts.verbosity);
+
+# Check before reading: under the self-hosted `loup run` an IoError from
+# readText cannot be caught.
+let path = if (opts.file == "-") { "/dev/stdin" } else { opts.file };
+let source = if (opts.file == "-") { "(standard input)" } else { opts.file };
+if (!exists(path)) {
+    fail(i"{$ opts.file $}: No such file or directory");
+}
+if (isDir(path)) {
+    fail(i"{$ opts.file $}: Is a directory");
+}
+log.info(i"reading {$ source $}");
+let text = readText(path);
+
+let table = load_table(text, opts, source, log);
+log.info(i"{$ table.names.len() $} column(s), {$ table.rows $} row(s)");
+
+if (opts.names_only) {
+    print(render_names(table.names));
+    exit(EXIT_OK);
+}
+if (opts.only == "count") {
+    println(str(table.rows));
+    exit(EXIT_OK);
+}
+
+let picked = select_columns(table.names, opts.columns, opts.not_columns);
+if (picked.is_err()) {
+    fail(picked.unwrap_err());
+}
+
+# Infer and describe the chosen columns, in the order chosen.
+let nulls = null_set(opts.null_values, opts.blanks);
+var described: list[ColumnStats] = [];
+for (k in picked.unwrap()) {
+    let (kind, cells) = infer_column(table.columns[k], nulls, inference = !opts.no_inference);
+    let s = describe(k + 1, table.names[k], kind, cells, opts.freq_count);
+    log.debug(i"column {$ s.id $} '{$ s.name $}': {$ type_name(kind) $}, {$ s.nonnulls $} value(s), {$ s.nulls $} null(s)");
+    described.push(s);
+}
+log.info(i"describing {$ described.len() $} of {$ table.names.len() $} column(s)");
+
+if (opts.only != "") {
+    print(render_one(described, opts.only, opts.grouping));
+} else if (opts.output == "csv") {
+    print(render_csv(described));
+} else if (opts.output == "look") {
+    print(render_look(stats_table(described, opts.grouping)));
+} else if (opts.output == "json") {
+    print(render_json(described, opts.indent));
+} else {
+    print(render_text(described, table.rows, opts.grouping));
+}
+exit(EXIT_OK);

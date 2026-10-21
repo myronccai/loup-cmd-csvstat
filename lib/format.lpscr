@@ -1,0 +1,63 @@
+@mode(host.scripted)
+
+# csvstat's number and cell formatting, shared by every report.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/format_test.lpscr imports it
+# under Stage0's test runner.
+
+from system.text import (padStart);
+from core.math import (round, abs);
+from .infer import (Cell);
+
+# Inserts thousands separators into a run of digits: "1234567" gives
+# "1,234,567". The loop walks back from the end three digits at a time.
+pub func group_digits(digits: string): string {
+    var parts: list[string] = [];
+    for (var end = digits.len(); end > 0; end = end - 3) {
+        let begin = if (end > 3) { end - 3 } else { 0 };
+        parts = [digits.slice(begin, end)] + parts;
+    }
+    return parts.join(",");
+}
+
+# The largest scaled value that still fits an int.
+const SCALED_LIMIT: float = 9.0e18;
+
+# A number rounded to at most three decimals, without trailing zeros, with
+# thousands separators unless `grouping` is false (csvkit's `#,##0.###`).
+pub func format_number(x: float, grouping: bool = true): string {
+    let scaled = round(abs(x) * 1000.0);
+    if (scaled >= SCALED_LIMIT) {
+        # Too large for three decimals to matter.
+        return str(x);
+    }
+    let thousandths = scaled as int;
+    var text = str(thousandths / 1000);
+    if (grouping) {
+        text = group_digits(text);
+    }
+    let fraction = thousandths % 1000;
+    if (fraction != 0) {
+        var digits = padStart(str(fraction), 3, "0");
+        while (digits.endsWith("0")) {
+            digits = digits.slice(0, digits.len() - 1);
+        }
+        text += "." + digits;
+    }
+    # -0.0004 rounds to 0, which has no sign.
+    return if (x < 0.0 and thousandths != 0) { "-" + text } else { text };
+}
+
+# A cell as the reports show it: booleans as True/False (agate's spelling),
+# numbers formatted, dates in ISO form, text as it is, null as "".
+pub func show_cell(c: Cell, grouping: bool = true): string {
+    match c {
+        Cell.Null => { return ""; },
+        Cell.Flag(on) => { return if (on) { "True" } else { "False" }; },
+        Cell.Num(value, _) => { return format_number(value, grouping = grouping); },
+        Cell.Day(_, iso) => { return iso; },
+        Cell.Moment(_, iso) => { return iso; },
+        Cell.Str(text) => { return text; },
+    }
+}

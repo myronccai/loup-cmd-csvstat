@@ -1,0 +1,183 @@
+@mode(host.scripted)
+
+# csvstat's reader: turns CSV text into a Table of named columns of raw
+# strings.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/reader_test.lpscr imports it
+# under Stage0's test runner.
+#
+# Structure: split_records cuts the text into records (one line, or several
+# when a quoted field holds line breaks), parse_record parses one record
+# with data.csv, and read_table takes the header, fixes the column names and
+# transposes the records into columns.
+
+from data.csv import (parse, CSVParseError);
+from system.text import (count);
+from .console import (Console);
+
+# A malformed record: the line and column in the input (0 when unknown),
+# and why.
+pub class CsvError : Exception {
+    pub let line: int;
+    pub let column: int;
+    pub let reason: string;
+
+    new(line: int, column: int, reason: string) {
+        super(i"line {$ line $}, column {$ column $}: {$ reason $}");
+        this.line = line;
+        this.column = column;
+        this.reason = reason;
+    }
+}
+
+pub struct Table {
+    pub names: list[string];
+    # The raw values of each column, one list per name, all as long as
+    # `rows`.
+    pub columns: list[list[string]];
+    pub rows: int;
+}
+
+const LETTERS: string = "abcdefghijklmnopqrstuvwxyz";
+
+# csvkit's names for unnamed columns: a ... z, then aa, bb, ... zz, aaa ...
+pub func letter_name(index: int): string {
+    return LETTERS.slice(index % 26, index % 26 + 1).repeat(index / 26 + 1);
+}
+
+# Cuts CSV text into records, each with the number of the line it starts
+# on. data.csv's parser reads its input one character at a time with
+# `substring`, which slows down with the length of the text in the
+# interpreters (seconds for a 70 KB file), so records are parsed one at a
+# time. A record continues over a line break while the number of quotes in
+# it is odd: the break is inside a quoted field. Blank lines are dropped.
+pub func split_records(text: string, first_line: int): list[(int, string)] {
+    var records: list[(int, string)] = [];
+    var pending: list[string] = [];
+    var start = first_line;
+    var line_no = first_line;
+    var quotes = 0;
+    for (line in text.split("\n")) {
+        if (pending.len() == 0) {
+            start = line_no;
+        }
+        pending.push(line);
+        quotes += count(line, "\"");
+        line_no += 1;
+        if (quotes % 2 == 0) {
+            let record = pending.join("\n");
+            if (record != "" and record != "\r") {
+                records.push((start, record));
+            }
+            pending = [];
+            quotes = 0;
+        }
+    }
+    # An unterminated quoted field runs to the end of the text; parse_record
+    # reports it.
+    if (pending.len() > 0) {
+        records.push((start, pending.join("\n")));
+    }
+    return records;
+}
+
+# The reason in a CSVParseError message, which reads
+# "CSV parse error at line L, column C: REASON".
+func reason_of(message: string): string {
+    let at = message.index_of(": ");
+    return if (at >= 0) { message.slice(at + 2) } else { message };
+}
+
+const UNTERMINATED: string = "unterminated quoted field";
+
+# The fields of one record that starts on line `line`. A stray quote is
+# reported where it is; an unterminated quoted field runs to the end of the
+# input, so it is reported at the line its record starts on, with no column.
+pub func parse_record(line: int, record: string, delimiter: string): list[string] {
+    try {
+        let rows = parse(record, delimiter);
+        return if (rows.len() == 0) { [] } else { rows[0] };
+    } catch (CSVParseError as e) {
+        let reason = reason_of(e.message);
+        if (reason == UNTERMINATED) {
+            throw CsvError(line, 0, reason);
+        }
+        throw CsvError(line + e.line - 1, e.column, reason);
+    }
+}
+
+# Header names with the empty ones replaced by their letter names and the
+# repeated ones numbered (`id`, `id_2`), as agate does.
+pub func unique_names(raw: list[string], log: Console): list[string] {
+    var seen: set[string] = set[string]();
+    var names: list[string] = [];
+    for (k in 0..raw.len()) {
+        var name = raw[k];
+        if (name.trim() == "") {
+            name = letter_name(k);
+        }
+        if (seen.contains(name)) {
+            var n = 2;
+            while (seen.contains(name + "_" + str(n))) {
+                n += 1;
+            }
+            let renamed = name + "_" + str(n);
+            log.warn(i"column {$ k + 1 $} is also named '{$ name $}'; calling it '{$ renamed $}'");
+            name = renamed;
+        }
+        seen.add(name);
+        names.push(name);
+    }
+    return names;
+}
+
+# Every parameter is required: under the self-hosted `loup run`, a function
+# that returns a struct gets no default values when another module calls it.
+pub func read_table(
+    text: string,
+    log: Console,
+    delimiter: string,
+    no_header: bool,
+    skip_lines: int,
+    source: string,
+): Table {
+    # A byte order mark would stick to the first column's name.
+    var body = if (text.startsWith("\u{FEFF}")) { text.slice(1) } else { text };
+    if (skip_lines > 0) {
+        let lines = body.split("\n");
+        let rest: list[string] = lines.slice(if (skip_lines < lines.len()) { skip_lines } else { lines.len() });
+        body = rest.join("\n");
+    }
+    var records: list[(int, list[string])] = [];
+    for (rec in split_records(body, skip_lines + 1)) {
+        let (line, record) = rec;
+        records.push((line, parse_record(line, record, delimiter)));
+    }
+    log.info(i"{$ source $}: {$ records.len() $} record(s)");
+    if (records.len() == 0) {
+        return Table(names = [], columns = [], rows = 0);
+    }
+
+    let first = records[0].1;
+    let names: list[string] = if (no_header) {
+        [letter_name(k) for k in 0..first.len()]
+    } else {
+        unique_names(first, log)
+    };
+    let data: list[(int, list[string])] = records.slice(if (no_header) { 0 } else { 1 });
+
+    # Transpose. A short record is padded with "" (null); the extra fields
+    # of a long one have no column to go to.
+    var columns: list[list[string]] = [[] for _ in 0..names.len()];
+    for (rec in data) {
+        let (line, fields) = rec;
+        if (fields.len() > names.len()) {
+            log.warn(i"{$ source $}:{$ line $}: {$ fields.len() $} fields, but the header has {$ names.len() $}; ignoring the rest");
+        }
+        for (k in 0..names.len()) {
+            columns[k].push(if (k < fields.len()) { fields[k] } else { "" });
+        }
+    }
+    return Table(names = names, columns = columns, rows = data.len());
+}

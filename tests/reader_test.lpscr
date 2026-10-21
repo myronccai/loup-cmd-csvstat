@@ -1,0 +1,104 @@
+@mode(host.scripted)
+
+# Unit tests for csvstat's reader (lib/reader.lpscr): records that span
+# lines, header names, ragged records, skipped lines and parse errors.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports. It is not
+# part of the program.
+
+from debug.assert import (expect, expectEq, expectThrows);
+from ..lib.console import (Console, quiet_console);
+from ..lib.reader import (CsvError, Table, letter_name, split_records, parse_record, unique_names, read_table);
+
+func table(text: string): Table {
+    return read_table(text, quiet_console(), ",", false, 0, "test");
+}
+
+func test_letter_names(): void {
+    expectEq(letter_name(0), "a", "first");
+    expectEq(letter_name(25), "z", "last single");
+    expectEq(letter_name(26), "aa", "doubled");
+    expectEq(letter_name(27), "bb", "csvkit doubles the letter");
+    expectEq(letter_name(52), "aaa", "tripled");
+}
+
+func test_split_records_keeps_quoted_line_breaks(): void {
+    let records = split_records("a,b\n1,\"two\nlines\"\n\n3,x\n", 1);
+    expectEq(records.len(), 3, "the blank line is dropped");
+    expectEq(records[0].0, 1, "first line");
+    expectEq(records[1].0, 2, "the quoted record starts on line 2");
+    expectEq(records[1].1, "1,\"two\nlines\"", "joined back");
+    expectEq(records[2].0, 5, "line numbers count the blank line");
+}
+
+func test_split_records_counts_from_first_line(): void {
+    let records = split_records("x\ny", 4);
+    expectEq(records[0].0, 4, "first");
+    expectEq(records[1].0, 5, "no final newline");
+}
+
+func test_parse_record(): void {
+    let fields = parse_record(1, "a,\"b, c\",\"say \"\"hi\"\"\",", ",");
+    expectEq(fields.len(), 4, "four fields");
+    expectEq(fields[1], "b, c", "quoted delimiter");
+    expectEq(fields[2], "say \"hi\"", "doubled quotes");
+    expectEq(fields[3], "", "empty last field");
+    expectEq(parse_record(1, "a;b\r", ";").join("|"), "a|b", "CRLF and another delimiter");
+}
+
+func stray_quote(): void {
+    parse_record(7, "ab\"c,d", ",");
+}
+
+func test_parse_errors_carry_the_line(): void {
+    let e = expectThrows(stray_quote, "stray quote");
+    expect(e.message.contains("stray quote after unquoted text"), "reason");
+    try {
+        parse_record(10, "a,\"open\nstill open", ",");
+        expect(false, "an unterminated field throws");
+    } catch (CsvError as err) {
+        expectEq(err.line, 10, "the line where the record starts");
+        expectEq(err.column, 0, "no column");
+        expectEq(err.reason, "unterminated quoted field", "reason");
+    }
+}
+
+func test_unique_names(): void {
+    let names = unique_names(["id", "", "id", "id", "id_2"], quiet_console());
+    expectEq(names.join(","), "id,b,id_2,id_3,id_2_2", "renamed");
+}
+
+func test_read_table(): void {
+    let t = table("name,age\nann,31\nbob,\n");
+    expectEq(t.names.join(","), "name,age", "names");
+    expectEq(t.rows, 2, "rows");
+    expectEq(t.columns[0].join(","), "ann,bob", "first column");
+    expectEq(t.columns[1].join(","), "31,", "second column");
+}
+
+func test_read_table_ragged_records(): void {
+    let t = table("a,b,c\n1\n1,2,3,4\n");
+    expectEq(t.rows, 2, "rows");
+    expectEq(t.columns[2].join("|"), "|3", "short record padded");
+    expectEq(t.columns.len(), 3, "extra field dropped");
+}
+
+func test_read_table_options(): void {
+    let t = read_table("\u{FEFF}# exported\n# by hand\n7;8\n9;10\n", quiet_console(), ";", true, 2, "test");
+    expectEq(t.names.join(","), "a,b", "letter names");
+    expectEq(t.rows, 2, "the first record is data");
+    expectEq(t.columns[1].join(","), "8,10", "values");
+    let empty = table("");
+    expectEq(empty.names.len(), 0, "no columns");
+    expectEq(empty.rows, 0, "no rows");
+    let header_only = table("x,y\n");
+    expectEq(header_only.names.join(","), "x,y", "header only");
+    expectEq(header_only.columns[0].len(), 0, "no values");
+}
+
+func test_bom_is_dropped(): void {
+    let t = table("\u{FEFF}id,v\n1,2\n");
+    expectEq(t.names[0], "id", "no BOM in the name");
+}

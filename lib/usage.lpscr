@@ -1,0 +1,63 @@
+@mode(host.scripted)
+
+# The text csvstat prints for --help and --version.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/e2e.sh checks its output there.
+
+from .appinfo import (APP_NAME, APP_VERSION);
+
+# A plain multiline string: interpolated `i"""` strings print nothing in
+# Loup 1.26, so the program name is written out. The text starts after the
+# first line break and ends at the closing quotes, with no final newline.
+let USAGE_TEXT: string = """
+usage: csvstat [OPTION]... [FILE]
+
+Print descriptive statistics for each column of a CSV file.
+With no FILE, or when FILE is -, read standard input.
+
+Input:
+  -d, --delimiter CHAR      field delimiter (default ,)
+  -t, --tabs                fields are separated by tabs
+  -H, --no-header-row       the first row is data; name the columns a, b, c...
+  -K, --skip-lines N        ignore the first N lines
+      --null-value TEXT     also treat TEXT as null (repeatable)
+      --blanks              do not treat "", na, n/a, none, null and . as null
+  -I, --no-inference        treat every column as Text
+
+Columns:
+  -c, --columns LIST        describe only these columns: names or 1-based
+                            indexes, comma-separated, ranges like 2-4 or 3-
+  -C, --not-columns LIST    describe every column except these
+  -n, --names               print the column indexes and names, then exit
+
+Output (one at a time; the default is a block of statistics per column):
+      --look                one aligned table with a row per column
+      --csv                 the same table as CSV
+      --json                a JSON array with an object per column
+      --indent N            JSON indentation (default 2; 0 for one line)
+      --type, --nulls, --non-nulls, --unique, --min, --max, --sum,
+      --mean, --median, --stdev, --len, --max-precision, --freq
+                            print only that statistic for each column
+      --count               print only the number of data rows
+      --freq-count N        most common values to list (default 5)
+  -G, --no-grouping-separator
+                            print numbers without thousands separators
+
+  -v, --verbose             log progress to standard error (-vv: per column)
+  -h, --help                display this help and exit
+  -V, --version             output version information and exit
+
+Under `loup run`, long options go after `--`:
+  loup run bin/csvstat.lpscr -- --look data.csv
+
+Exit status: 0 success, 1 unreadable or malformed input or an invalid
+column, 2 usage error.""";
+
+pub func usage(): string {
+    return USAGE_TEXT;
+}
+
+pub func version_line(): string {
+    return i"{$ APP_NAME $} (loup-cmd-{$ APP_NAME $}) {$ APP_VERSION $}";
+}

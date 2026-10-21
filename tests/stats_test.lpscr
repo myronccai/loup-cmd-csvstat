@@ -1,0 +1,108 @@
+@mode(host.scripted)
+
+# Unit tests for csvstat's statistics (lib/stats.lpscr): the generic tally
+# and extremes, median, mean, standard deviation and describe() per type.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports. It is not
+# part of the program. Expected values were checked with Python's
+# statistics module.
+
+from debug.assert import (expect, expectEq, expectNear);
+from ..lib.infer import (Cell, null_set, infer_column, identity);
+from ..lib.stats import (ColumnStats, tally, extremes, median, mean, sample_stdev, describe);
+
+func stats_of(values: list[string]): ColumnStats {
+    let (kind, cells) = infer_column(values, null_set([], false), true);
+    return describe(3, "col", kind, cells, 5);
+}
+
+func test_tally_orders_by_count_then_first_seen(): void {
+    let counts = tally(["b", "a", "c", "a", "b", "d", "a"], func(s: string) => s);
+    let shown: list[string] = [pair.0 + "=" + str(pair.1) for pair in counts];
+    expectEq(shown.join(" "), "a=3 b=2 c=1 d=1", "a first, then b; c before d");
+}
+
+func test_tally_groups_by_key(): void {
+    let counts = tally(["Apple", "apple", "PEAR"], func(s: string) => s.toLowerCase());
+    expectEq(counts.len(), 2, "two keys");
+    expectEq(counts[0].0, "Apple", "the first element stands for its group");
+    expectEq(counts[0].1, 2, "count");
+}
+
+func test_extremes(): void {
+    let pair = extremes(["ccc", "a", "bb", "zzz"], func(s: string) => s.len() as float).unwrap();
+    expectEq(pair.0, "a", "shortest");
+    expectEq(pair.1, "ccc", "the first of the longest");
+    let nothing: list[string] = [];
+    expect(extremes(nothing, func(s: string) => 0.0).is_none(), "empty");
+}
+
+func test_median_mean_stdev(): void {
+    expectEq(median([5.0, 1.0, 3.0]).unwrap(), 3.0, "odd count");
+    expectEq(median([4.0, 1.0, 3.0, 2.0]).unwrap(), 2.5, "even count");
+    let none: list[float] = [];
+    expect(median(none).is_none(), "empty median");
+    expectEq(mean([1.0, 2.0, 6.0]).unwrap(), 3.0, "mean");
+    expectNear(sample_stdev([34.0, 28.0, 45.0, 28.0]).unwrap(), 8.0156, 0.0001, "sample stdev");
+    expect(sample_stdev([7.0]).is_none(), "one value has no stdev");
+}
+
+func test_describe_numbers(): void {
+    let s = stats_of(["34", "28", "n/a", "45", "28.50"]);
+    expectEq(s.id, 3, "id");
+    expectEq(s.nulls, 1, "nulls");
+    expectEq(s.nonnulls, 4, "non-nulls");
+    expectEq(s.distinct, 4, "distinct");
+    expectEq(sort_value(s.min), 28.0, "min");
+    expectEq(sort_value(s.max), 45.0, "max");
+    expectEq(s.sum.unwrap(), 135.5, "sum");
+    expectEq(s.mean.unwrap(), 33.875, "mean");
+    expectEq(s.median.unwrap(), 31.25, "median");
+    expectEq(s.places.unwrap_or(-1), 2, "decimal places");
+    expect(s.longest.is_none(), "no length for numbers");
+    expectEq(identity(s.freq[0].0), "34", "first seen of the ties");
+}
+
+func sort_value(c: Option[Cell]): float {
+    return match c {
+        Some(Cell.Num(value, _)) => value,
+        _ => -1.0,
+    };
+}
+
+func test_describe_text(): void {
+    let s = stats_of(["Lisbon", "Porto", "", "Lisbon", "Évora"]);
+    expectEq(s.longest.unwrap_or(-1), 6, "Lisbon has six characters");
+    expect(s.min.is_none() and s.sum.is_none() and s.places.is_none(), "no numbers");
+    expectEq(s.freq.len(), 3, "three values");
+    expectEq(identity(s.freq[0].0), "Lisbon", "most common");
+    expectEq(s.freq[0].1, 2, "twice");
+}
+
+func test_describe_dates_and_booleans(): void {
+    let dates = stats_of(["2026-03-01", "2025-12-31", "2026-01-15"]);
+    expectEq(identity(dates.min.unwrap()), "2025-12-31", "earliest");
+    expectEq(identity(dates.max.unwrap()), "2026-03-01", "latest");
+    expect(dates.sum.is_none() and dates.median.is_none(), "no arithmetic on dates");
+    let flags = stats_of(["yes", "no", "Y", "true"]);
+    expectEq(flags.distinct, 2, "two values");
+    expectEq(identity(flags.freq[0].0) + str(flags.freq[0].1), "True3", "true three times");
+    expect(flags.min.is_none(), "booleans have no range");
+}
+
+func test_describe_empty_column(): void {
+    let s = stats_of(["", "na"]);
+    expectEq(s.nonnulls, 0, "no values");
+    expectEq(s.nulls, 2, "two nulls");
+    expectEq(s.freq.len(), 0, "nothing common");
+    expectEq(s.longest.unwrap_or(-1), -1, "no longest value");
+}
+
+func test_freq_count_limits_the_list(): void {
+    let (kind, cells) = infer_column(["a", "b", "c", "a"], null_set([], false), true);
+    let s = describe(1, "x", kind, cells, 2);
+    expectEq(s.freq.len(), 2, "two kept");
+    expectEq(s.distinct, 3, "but three distinct");
+}

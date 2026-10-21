@@ -1,0 +1,294 @@
+[
+  {
+    "column_id": 1,
+    "column_name": "name",
+    "type": "Text",
+    "nulls": false,
+    "nonnulls": 8,
+    "unique": 8,
+    "min": null,
+    "max": null,
+    "sum": null,
+    "mean": null,
+    "median": null,
+    "stdev": null,
+    "len": 5,
+    "maxprecision": null,
+    "freq": [
+      {
+        "value": "Alice",
+        "count": 1
+      },
+      {
+        "value": "Bob",
+        "count": 1
+      },
+      {
+        "value": "Carol",
+        "count": 1
+      },
+      {
+        "value": "Dave",
+        "count": 1
+      },
+      {
+        "value": "Eve",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "column_id": 2,
+    "column_name": "age",
+    "type": "Number",
+    "nulls": true,
+    "nonnulls": 7,
+    "unique": 5,
+    "min": 28,
+    "max": 51,
+    "sum": 253,
+    "mean": 36.143,
+    "median": 34,
+    "stdev": 9.227,
+    "len": null,
+    "maxprecision": 0,
+    "freq": [
+      {
+        "value": 28,
+        "count": 3
+      },
+      {
+        "value": 34,
+        "count": 1
+      },
+      {
+        "value": 45,
+        "count": 1
+      },
+      {
+        "value": 51,
+        "count": 1
+      },
+      {
+        "value": 39,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "column_id": 3,
+    "column_name": "height",
+    "type": "Number",
+    "nulls": true,
+    "nonnulls": 7,
+    "unique": 7,
+    "min": 1.6,
+    "max": 1.9,
+    "sum": 12.22,
+    "mean": 1.746,
+    "median": 1.75,
+    "stdev": 0.098,
+    "len": null,
+    "maxprecision": 2,
+    "freq": [
+      {
+        "value": 1.68,
+        "count": 1
+      },
+      {
+        "value": 1.82,
+        "count": 1
+      },
+      {
+        "value": 1.75,
+        "count": 1
+      },
+      {
+        "value": 1.9,
+        "count": 1
+      },
+      {
+        "value": 1.6,
+        "count": 1
+      }
+    ]
+  },
+  {
+    "column_id": 4,
+    "column_name": "member",
+    "type": "Boolean",
+    "nulls": false,
+    "nonnulls": 8,
+    "unique": 2,
+    "min": null,
+    "max": null,
+    "sum": null,
+    "mean": null,
+    "median": null,
+    "stdev": null,
+    "len": null,
+    "maxprecision": null,
+    "freq": [
+      {
+        "value": true,
+        "count": 4
+      },
+      {
+        "value": false,
+        "count": 4
+      }
+    ]
+  },
+  {
+    "column_id": 5,
+    "column_name": "joined",
+    "type": "Date",
+    "nulls": false,
+    "nonnulls": 8,
+    "unique": 8,
+    "min": "2016-12-31",
+    "max": "2023-02-28",
+    "sum": null,
+    "mean": null,
+    "median": null,
+    "stdev": null,
+    "len": null,
+    "maxprecision": null,
+    "freq": [
+      {
+        "value": "2019-03-14",
+        "count": 1
+      },
+      {
+        "value": "2021-07-01",
+        "count": 1
+      },
+      {
+        "value": "2018-11-23",
+        "count": 1
+      },
+      {
+        "value": "2020-01-05",
+        "count": 1
+      },
+      {
+        "value": "2022-05-30",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "column_id": 6,
+    "column_name": "last_login",
+    "type": "DateTime",
+    "nulls": true,
+    "nonnulls": 7,
+    "unique": 7,
+    "min": "2026-09-29T19:30:00",
+    "max": "2026-10-03T23:59:59",
+    "sum": null,
+    "mean": null,
+    "median": null,
+    "stdev": null,
+    "len": null,
+    "maxprecision": null,
+    "freq": [
+      {
+        "value": "2026-10-01T08:15:00",
+        "count": 1
+      },
+      {
+        "value": "2026-09-30T22:05:10",
+        "count": 1
+      },
+      {
+        "value": "2026-10-02T12:00:00",
+        "count": 1
+      },
+      {
+        "value": "2026-10-02T00:00:00",
+        "count": 1
+      },
+      {
+        "value": "2026-10-03T07:45:00",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "column_id": 7,
+    "column_name": "city",
+    "type": "Text",
+    "nulls": false,
+    "nonnulls": 8,
+    "unique": 5,
+    "min": null,
+    "max": null,
+    "sum": null,
+    "mean": null,
+    "median": null,
+    "stdev": null,
+    "len": 12,
+    "maxprecision": null,
+    "freq": [
+      {
+        "value": "Lisbon",
+        "count": 4
+      },
+      {
+        "value": "Porto, Norte",
+        "count": 1
+      },
+      {
+        "value": "Faro",
+        "count": 1
+      },
+      {
+        "value": "Coimbra",
+        "count": 1
+      },
+      {
+        "value": "Braga",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "column_id": 8,
+    "column_name": "score",
+    "type": "Number",
+    "nulls": true,
+    "nonnulls": 7,
+    "unique": 6,
+    "min": -35.25,
+    "max": 2400,
+    "sum": 7190.375,
+    "mean": 1027.196,
+    "median": 980,
+    "stdev": 734.648,
+    "len": null,
+    "maxprecision": 3,
+    "freq": [
+      {
+        "value": 980,
+        "count": 2
+      },
+      {
+        "value": 1250.5,
+        "count": 1
+      },
+      {
+        "value": 2400,
+        "count": 1
+      },
+      {
+        "value": -35.25,
+        "count": 1
+      },
+      {
+        "value": 1000,
+        "count": 1
+      }
+    ]
+  }
+]

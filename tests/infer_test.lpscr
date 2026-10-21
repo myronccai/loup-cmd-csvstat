@@ -1,0 +1,118 @@
+@mode(host.scripted)
+
+# Unit tests for csvstat's type inference (lib/infer.lpscr): nulls, the
+# parser of each type, the order types are tried in, and cell identities.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports. It is not
+# part of the program.
+
+from debug.assert import (expect, expectEq);
+from ..lib.infer import (ColumnType, Cell, type_name, null_set, is_null, parse_bool, parse_number,
+    parse_date, parse_datetime, infer_column, identity, sort_key, is_value);
+
+func kind_of(values: list[string]): string {
+    let (kind, _) = infer_column(values, null_set([], false), true);
+    return type_name(kind);
+}
+
+func number(raw: string): string {
+    return match parse_number(raw) {
+        Some(pair) => str(pair.0) + "/" + str(pair.1),
+        None => "-",
+    };
+}
+
+func test_nulls(): void {
+    let nulls = null_set([], false);
+    expect(is_null("", nulls) and is_null(" NA ", nulls) and is_null("n/a", nulls), "defaults");
+    expect(is_null("None", nulls) and is_null("NULL", nulls) and is_null(".", nulls), "more defaults");
+    expect(!is_null("0", nulls) and !is_null("-", nulls), "not null");
+    let custom = null_set(["-", "Missing"], false);
+    expect(is_null("-", custom) and is_null("missing", custom) and is_null("", custom), "extra values, any case");
+    let blanks = null_set(["-"], true);
+    expect(!is_null("", blanks) and !is_null("na", blanks) and is_null("-", blanks), "--blanks keeps only the extras");
+}
+
+func test_booleans(): void {
+    expect(parse_bool("Yes").unwrap() and parse_bool("T").unwrap() and parse_bool(" true ").unwrap(), "true words");
+    expect(!parse_bool("no").unwrap() and !parse_bool("F").unwrap() and !parse_bool("n").unwrap(), "false words");
+    expect(parse_bool("1").is_none() and parse_bool("maybe").is_none(), "not booleans");
+}
+
+func test_numbers(): void {
+    expectEq(number("42"), "42/0", "integer");
+    expectEq(number("-3.250"), "-3.25/3", "places as written");
+    expectEq(number("+.5"), "0.5/1", "no whole part");
+    expectEq(number("7."), "7/0", "no fraction digits");
+    expectEq(number("1,234,567.8"), "1234567.8/1", "grouped");
+    expectEq(number("$1,250"), "1250/0", "currency");
+    expectEq(number("-€3"), "-3/0", "sign before currency");
+    expectEq(number("2.5e3"), "2500/1", "exponent");
+    expectEq(number("1E-2"), "0.01/0", "negative exponent");
+}
+
+func test_not_numbers(): void {
+    for (raw in ["", "-", "$", ".", "1,23", "12,3456", ",123", "1.2.3", "e5", "1e", "inf", "NaN", "0x10", "1_000", "12 apples"]) {
+        expectEq(number(raw), "-", "'" + raw + "'");
+    }
+}
+
+func test_dates(): void {
+    match parse_date("2024-02-29") {
+        Some(Cell.Day(days, iso)) => {
+            expectEq(days, 19782, "days since 1970");
+            expectEq(iso, "2024-02-29", "iso");
+        },
+        _ => { expect(false, "a leap day is a date"); },
+    }
+    expect(parse_date("2023-02-29").is_none(), "not a leap year");
+    expect(parse_date("2024-13-01").is_none(), "month 13");
+    expect(parse_date("24-02-29").is_none() and parse_date("2024/02/29").is_none(), "other shapes");
+}
+
+func test_datetimes(): void {
+    match parse_datetime("2026-10-20 14:30") {
+        Some(Cell.Moment(millis, iso)) => {
+            expectEq(iso, "2026-10-20T14:30:00", "minutes");
+            expectEq(millis, 1792506600000, "milliseconds since 1970");
+        },
+        _ => { expect(false, "a date and a time"); },
+    }
+    expectEq(identity(parse_datetime("2026-10-20T14:30:05.250Z").unwrap()), "2026-10-20T14:30:05.250000", "fraction and Z");
+    expectEq(identity(parse_datetime("2026-10-20").unwrap()), "2026-10-20T00:00:00", "a date is midnight");
+    expect(parse_datetime("2026-10-20 25:00").is_none(), "hour 25");
+    expect(parse_datetime("2026-10-20x14:30").is_none(), "bad separator");
+    expect(parse_datetime("2026-10-20 14:30+02:00").is_none(), "offsets are not read");
+}
+
+func test_inference_order(): void {
+    expectEq(kind_of(["yes", "No", ""]), "Boolean", "booleans and a null");
+    expectEq(kind_of(["1", "0", "1"]), "Number", "0 and 1 are numbers here");
+    expectEq(kind_of(["2026-01-02", "n/a"]), "Date", "dates");
+    expectEq(kind_of(["2026-01-02", "2026-01-02 10:00"]), "DateTime", "dates and date-times");
+    expectEq(kind_of(["1", "x"]), "Text", "one word makes text");
+    expectEq(kind_of(["", "NULL"]), "Text", "no values at all");
+}
+
+func test_cells_keep_nulls_in_place(): void {
+    let (kind, cells) = infer_column(["3", "", "4.5"], null_set([], false), true);
+    expect(kind == ColumnType.Number, "number");
+    expectEq(cells.len(), 3, "one cell per value");
+    expect(is_value(cells[0]) and !is_value(cells[1]) and is_value(cells[2]), "null in the middle");
+    expectEq(sort_key(cells[2]), 4.5, "sort key");
+}
+
+func test_no_inference(): void {
+    let (kind, cells) = infer_column(["3", "", "4.5"], null_set([], false), false);
+    expectEq(type_name(kind), "Text", "text");
+    expectEq(identity(cells[0]), "3", "raw text");
+    expect(!is_value(cells[1]), "nulls stay null");
+}
+
+func test_identities(): void {
+    expectEq(identity(Cell.Num(1.5, 2)), identity(Cell.Num(1.5, 1)), "1.50 is 1.5");
+    expectEq(identity(Cell.Flag(true)), "True", "boolean");
+    expectEq(identity(Cell.Str(" a ")), " a ", "text as written");
+}

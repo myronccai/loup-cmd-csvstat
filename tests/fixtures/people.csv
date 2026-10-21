@@ -1,0 +1,9 @@
+name,age,height,member,joined,last_login,city,score
+Alice,34,1.68,yes,2019-03-14,2026-10-01 08:15,Lisbon,"1,250.5"
+Bob,28,1.82,no,2021-07-01,2026-09-30T22:05:10,"Porto, Norte",980
+Carol,n/a,1.75,yes,2018-11-23,,Lisbon,"2,400"
+Dave,45,1.9,no,2020-01-05,2026-10-02 12:00,Faro,-35.25
+Eve,28,1.6,YES,2022-05-30,2026-10-02,Lisbon,1e3
+Frank,51,1.77,n,2017-09-09,2026-10-03T07:45:00Z,Coimbra,NULL
+Grace,28,1.7,y,2023-02-28,2026-09-29 19:30,Braga,615.125
+Heidi,39,,No,2016-12-31,2026-10-03 23:59:59,Lisbon,980

@@ -1,0 +1,124 @@
+@mode(host.scripted)
+
+# Unit tests for csvstat's reports (lib/report.lpscr and
+# lib/report_json.lpscr): the text report, single statistics, the CSV and
+# look tables, JSON and the column list.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports. It is not
+# part of the program. The CSV report is read back with data.csv's
+# parseRecords, as another program would read it.
+
+from debug.assert import (expect, expectEq);
+from data.csv import (parseRecords);
+from ..lib.infer import (null_set, infer_column);
+from ..lib.stats import (ColumnStats, describe);
+from ..lib.report import (statistics, render_text, render_one, stats_table, render_csv, render_look, render_names);
+from ..lib.report_json import (render_json);
+
+func column(id: int, name: string, values: list[string]): ColumnStats {
+    let (kind, cells) = infer_column(values, null_set([], false), true);
+    return describe(id, name, kind, cells, 3);
+}
+
+func sample(): list[ColumnStats] {
+    return [
+        column(1, "city", ["Porto, Norte", "Faro", "Faro", ""]),
+        column(2, "total", ["1200", "37.5", "", "1200"]),
+    ];
+}
+
+func test_registry_order(): void {
+    let names: list[string] = [stat.name for stat in statistics()];
+    expectEq(names.join(","), "type,nulls,nonnulls,unique,min,max,sum,mean,median,stdev,len,maxprecision,freq", "csvkit's order");
+}
+
+func test_render_text(): void {
+    let expected = [
+        "  1. \"city\"",
+        "",
+        "\tType of data:          Text",
+        "\tContains null values:  True (excluded from calculations)",
+        "\tNon-null values:       3",
+        "\tUnique values:         2",
+        "\tLongest value:         12 characters",
+        "\tMost common values:    Faro (2x)",
+        "\t                       Porto, Norte (1x)",
+        "",
+        "  2. \"total\"",
+        "",
+        "\tType of data:          Number",
+        "\tContains null values:  True (excluded from calculations)",
+        "\tNon-null values:       3",
+        "\tUnique values:         2",
+        "\tSmallest value:        37.5",
+        "\tLargest value:         1,200",
+        "\tSum:                   2,437.5",
+        "\tMean:                  812.5",
+        "\tMedian:                1,200",
+        "\tStDev:                 671.17",
+        "\tMost decimal places:   1",
+        "\tMost common values:    1,200 (2x)",
+        "\t                       37.5 (1x)",
+        "",
+        "Row count: 4",
+        "",
+    ];
+    expectEq(render_text(sample(), 4, true), expected.join("\n"), "text report");
+}
+
+func test_render_one(): void {
+    expectEq(render_one(sample(), "max", true), "  1. city: None\n  2. total: 1,200\n", "per column");
+    expectEq(render_one([sample()[1]], "sum", false), "2437.5\n", "one column: the bare value");
+    expectEq(render_one(sample(), "freq", true), "  1. city: { \"Faro\": 2, \"Porto, Norte\": 1 }\n  2. total: { \"1,200\": 2, \"37.5\": 1 }\n", "freq");
+    expectEq(render_one(sample(), "nulls", true), "  1. city: True\n  2. total: True\n", "nulls");
+}
+
+func test_csv_reads_back(): void {
+    let records = parseRecords(render_csv(sample()), ",");
+    expectEq(records.len(), 2, "a record per column");
+    expectEq(records[0]["column_name"], "city", "name");
+    expectEq(records[0]["min"], "", "no min for text");
+    expectEq(records[0]["freq"], "Faro, \"Porto, Norte\"", "the value holding the separator is quoted");
+    expectEq(records[1]["sum"], "2437.5", "no grouping in CSV");
+    expectEq(records[1]["len"], "", "no length for numbers");
+    expectEq(records[1]["maxprecision"], "1", "decimal places");
+}
+
+func test_render_look(): void {
+    let table: list[list[string]] = [["id", "name", "mixed"], ["7", "a", "x"], ["10", "bcd", "1"], ["", "e", ""]];
+    let expected = [
+        "| id | name | mixed |",
+        "| -- | ---- | ----- |",
+        "|  7 | a    | x     |",
+        "| 10 | bcd  | 1     |",
+        "|    | e    |       |",
+        "",
+    ];
+    expectEq(render_look(table), expected.join("\n"), "numbers right, the rest left");
+    let header_only: list[list[string]] = [["a"]];
+    expectEq(render_look(header_only), "| a |\n| - |\n", "header only");
+}
+
+func test_stats_table_shape(): void {
+    let table = stats_table(sample(), true);
+    expectEq(table.len(), 3, "header and two rows");
+    expectEq(table[0].len(), 15, "fifteen columns");
+    expectEq(table[2][7], "1,200", "max, grouped for --look");
+}
+
+func test_render_json(): void {
+    let expected = "[{\"column_id\":2,\"column_name\":\"total\",\"type\":\"Number\",\"nulls\":true,\"nonnulls\":3,"
+        + "\"unique\":2,\"min\":37.5,\"max\":1200,\"sum\":2437.5,\"mean\":812.5,\"median\":1200,\"stdev\":671.17,"
+        + "\"len\":null,\"maxprecision\":1,\"freq\":[{\"value\":1200,\"count\":2},{\"value\":37.5,\"count\":1}]}]\n";
+    expectEq(render_json([sample()[1]], 0), expected, "one line");
+    let indented = render_json([sample()[0]], 2);
+    expect(indented.startsWith("[\n  {\n    \"column_id\": 1,"), "indented");
+    expect(indented.contains("\"value\": \"Porto, Norte\""), "text values are strings");
+}
+
+func test_render_names(): void {
+    expectEq(render_names(["a", "b"]), "  1: a\n  2: b\n", "names");
+    expectEq(render_names([]), "", "none");
+}

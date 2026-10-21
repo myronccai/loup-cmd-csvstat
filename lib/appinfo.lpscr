@@ -1,0 +1,17 @@
+@mode(host.scripted)
+
+# csvstat's identity and exit statuses. Keep APP_VERSION in step with
+# `version` in package.lppkg.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; lib/usage.lpscr and lib/console.lpscr
+# import it too, and Stage0's test runner loads it through them.
+
+pub const APP_NAME: string = "csvstat";
+pub const APP_VERSION: string = "0.1.0";
+pub const APP_SUMMARY: string = "Print descriptive statistics for each column of a CSV file.";
+
+# Exit statuses.
+pub const EXIT_OK: int = 0;
+pub const EXIT_FAILURE: int = 1;
+pub const EXIT_USAGE: int = 2;

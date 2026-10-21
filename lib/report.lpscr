@@ -1,0 +1,215 @@
+@mode(host.scripted)
+
+# csvstat's reports: the registry of statistics and every output form but
+# JSON (lib/report_json.lpscr).
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/report_test.lpscr imports it
+# under Stage0's test runner.
+#
+# Structure: statistics() lists the thirteen statistics in csvkit's order,
+# each with a function that gives its value for a column as text. The text
+# report, the single-statistic lines and the CSV and look tables all walk
+# that list; only the decorations differ.
+
+from data.csv import (write, escapeField);
+from system.text import (padStart, padEnd);
+from system.collections import (find, all, map);
+from .infer import (Cell, type_name, parse_number);
+from .stats import (ColumnStats);
+from .format import (format_number, show_cell);
+
+pub class Statistic {
+    # The name used by the option (`--mean`), the CSV header and JSON.
+    pub let name: string;
+    # The label in the text report.
+    pub let label: string;
+    # The value for a column, None when it does not apply; the bool asks
+    # for thousands separators.
+    pub let value: fn(ColumnStats, bool): Option[string];
+}
+
+func number_text(x: Option[float], grouping: bool): Option[string] {
+    return x.map(func(v: float): string { return format_number(v, grouping = grouping); });
+}
+
+func cell_text(c: Option[Cell], grouping: bool): Option[string] {
+    return c.map(func(cell: Cell): string { return show_cell(cell, grouping = grouping); });
+}
+
+# The values are joined with ", ".
+const LIST_SEPARATOR: string = ", ";
+
+# The most common values as one field. A value that holds the separator (or
+# a quote or line break) is quoted the CSV way, with the separator as the
+# delimiter, so that "Porto, Norte" stays one value; "1,250" does not need
+# it.
+func freq_text(s: ColumnStats, grouping: bool): Option[string] {
+    let shown: list[string] = [escapeField(show_cell(pair.0, grouping = grouping), LIST_SEPARATOR) for pair in s.freq];
+    return Some(shown.join(LIST_SEPARATOR));
+}
+
+pub func statistics(): list[Statistic] {
+    return [
+        Statistic(name = "type", label = "Type of data",
+            value = func(s: ColumnStats, g: bool) => Some(type_name(s.kind))),
+        Statistic(name = "nulls", label = "Contains null values",
+            value = func(s: ColumnStats, g: bool) => Some(if (s.nulls > 0) { "True" } else { "False" })),
+        Statistic(name = "nonnulls", label = "Non-null values",
+            value = func(s: ColumnStats, g: bool) => Some(str(s.nonnulls))),
+        Statistic(name = "unique", label = "Unique values",
+            value = func(s: ColumnStats, g: bool) => Some(str(s.distinct))),
+        Statistic(name = "min", label = "Smallest value",
+            value = func(s: ColumnStats, g: bool) => cell_text(s.min, g)),
+        Statistic(name = "max", label = "Largest value",
+            value = func(s: ColumnStats, g: bool) => cell_text(s.max, g)),
+        Statistic(name = "sum", label = "Sum",
+            value = func(s: ColumnStats, g: bool) => number_text(s.sum, g)),
+        Statistic(name = "mean", label = "Mean",
+            value = func(s: ColumnStats, g: bool) => number_text(s.mean, g)),
+        Statistic(name = "median", label = "Median",
+            value = func(s: ColumnStats, g: bool) => number_text(s.median, g)),
+        Statistic(name = "stdev", label = "StDev",
+            value = func(s: ColumnStats, g: bool) => number_text(s.stdev, g)),
+        Statistic(name = "len", label = "Longest value",
+            value = func(s: ColumnStats, g: bool) => s.longest.map(func(n: int): string { return str(n); })),
+        Statistic(name = "maxprecision", label = "Most decimal places",
+            value = func(s: ColumnStats, g: bool) => s.places.map(func(n: int): string { return str(n); })),
+        Statistic(name = "freq", label = "Most common values",
+            value = freq_text),
+    ];
+}
+
+# One statistic's value for one column. The function field is called
+# through this typed parameter: in the 1.26 interpreters, calling it on a
+# `for` loop variable (`stat.value(s, g)` inside `for (stat in ...)`) is
+# taken for a method call and fails.
+pub func evaluate(stat: Statistic, column: ColumnStats, grouping: bool): Option[string] {
+    return stat.value(column, grouping);
+}
+
+# Wide enough for the longest label and its colon, as csvkit pads them.
+const LABEL_WIDTH: int = 22;
+
+func labelled(label: string, value: string): string {
+    return "\t" + padEnd(label, LABEL_WIDTH, " ") + " " + value;
+}
+
+func heading(s: ColumnStats): string {
+    return padStart(str(s.id), 3, " ") + ". \"" + s.name + "\"";
+}
+
+# csvkit's default report: a block per column, then the row count.
+pub func render_text(columns: list[ColumnStats], rows: int, grouping: bool): string {
+    var out: list[string] = [];
+    for (s in columns) {
+        out.push(heading(s));
+        out.push("");
+        for (stat in statistics()) {
+            let label = stat.label + ":";
+            if (stat.name == "freq") {
+                # One line per value; only the first carries the label.
+                for (k in 0..s.freq.len()) {
+                    let (cell, n) = s.freq[k];
+                    let shown = show_cell(cell, grouping = grouping) + " (" + str(n) + "x)";
+                    out.push(labelled(if (k == 0) { label } else { "" }, shown));
+                }
+                continue;
+            }
+            match evaluate(stat, s, grouping) {
+                Some(value) => {
+                    let decorated = match stat.name {
+                        "nulls" => if (s.nulls > 0) { value + " (excluded from calculations)" } else { value },
+                        "len" => value + " characters",
+                        _ => value,
+                    };
+                    out.push(labelled(label, decorated));
+                },
+                None => {},
+            }
+        }
+        out.push("");
+    }
+    out.push("Row count: " + str(rows));
+    return out.join("\n") + "\n";
+}
+
+# The output of one statistic option (`--mean`): a line per column, or just
+# the value when one column is described. Values that do not apply print
+# as None, as csvkit does.
+pub func render_one(columns: list[ColumnStats], name: string, grouping: bool): string {
+    let stat = find(statistics(), func(st: Statistic): bool { return st.name == name; }).unwrap();
+    var out: list[string] = [];
+    for (s in columns) {
+        var value = "";
+        if (name == "freq") {
+            let pairs: list[string] = ["\"" + show_cell(p.0, grouping = grouping) + "\": " + str(p.1) for p in s.freq];
+            value = "{ " + pairs.join(", ") + " }";
+        } else {
+            value = evaluate(stat, s, grouping) ?? "None";
+        }
+        out.push(if (columns.len() == 1) { value } else { padStart(str(s.id), 3, " ") + ". " + s.name + ": " + value });
+    }
+    return out.join("\n") + "\n";
+}
+
+# The table behind --csv and --look: a header, then a row per column.
+pub func stats_table(columns: list[ColumnStats], grouping: bool): list[list[string]] {
+    let names: list[string] = [stat.name for stat in statistics()];
+    var rows: list[list[string]] = [["column_id", "column_name"] + names];
+    for (s in columns) {
+        let values: list[string] = [evaluate(stat, s, grouping) ?? "" for stat in statistics()];
+        rows.push([str(s.id), s.name] + values);
+    }
+    return rows;
+}
+
+pub func render_csv(columns: list[ColumnStats]): string {
+    # Plain numbers: a CSV reader should not have to strip separators.
+    return write(stats_table(columns, false), ",") + "\n";
+}
+
+# csvlook's layout: every cell padded to its column's width between `|`
+# bars, a rule of dashes under the header, and the columns whose values are
+# all numbers right-aligned.
+pub func render_look(table: list[list[string]]): string {
+    if (table.len() == 0) {
+        return "";
+    }
+    let width = table[0].len();
+    var widths: list[int] = [];
+    var numeric: list[bool] = [];
+    for (k in 0..width) {
+        let cells = map(table, func(row: list[string]): string { return row[k]; });
+        var w = 0;
+        for (c in cells) {
+            if (c.len() > w) {
+                w = c.len();
+            }
+        }
+        widths.push(w);
+        let values = cells.slice(1);
+        numeric.push(all(values, func(c: string) => c == "" or parse_number(c).is_some())
+            and values.len() > 0);
+    }
+    var out: list[string] = [];
+    for (r in 0..table.len()) {
+        let row = table[r];
+        let padded: list[string] = [
+            if (r > 0 and numeric[k]) { padStart(row[k], widths[k], " ") } else { padEnd(row[k], widths[k], " ") }
+            for k in 0..width
+        ];
+        out.push("| " + padded.join(" | ") + " |");
+        if (r == 0) {
+            let rule: list[string] = ["-".repeat(widths[k]) for k in 0..width];
+            out.push("| " + rule.join(" | ") + " |");
+        }
+    }
+    return out.join("\n") + "\n";
+}
+
+# `-n`: the columns with their 1-based indexes.
+pub func render_names(names: list[string]): string {
+    let lines: list[string] = [padStart(str(k + 1), 3, " ") + ": " + names[k] for k in 0..names.len()];
+    return if (lines.len() == 0) { "" } else { lines.join("\n") + "\n" };
+}

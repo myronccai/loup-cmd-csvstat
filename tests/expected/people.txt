@@ -1,0 +1,121 @@
+  1. "name"
+
+	Type of data:          Text
+	Contains null values:  False
+	Non-null values:       8
+	Unique values:         8
+	Longest value:         5 characters
+	Most common values:    Alice (1x)
+	                       Bob (1x)
+	                       Carol (1x)
+	                       Dave (1x)
+	                       Eve (1x)
+
+  2. "age"
+
+	Type of data:          Number
+	Contains null values:  True (excluded from calculations)
+	Non-null values:       7
+	Unique values:         5
+	Smallest value:        28
+	Largest value:         51
+	Sum:                   253
+	Mean:                  36.143
+	Median:                34
+	StDev:                 9.227
+	Most decimal places:   0
+	Most common values:    28 (3x)
+	                       34 (1x)
+	                       45 (1x)
+	                       51 (1x)
+	                       39 (1x)
+
+  3. "height"
+
+	Type of data:          Number
+	Contains null values:  True (excluded from calculations)
+	Non-null values:       7
+	Unique values:         7
+	Smallest value:        1.6
+	Largest value:         1.9
+	Sum:                   12.22
+	Mean:                  1.746
+	Median:                1.75
+	StDev:                 0.098
+	Most decimal places:   2
+	Most common values:    1.68 (1x)
+	                       1.82 (1x)
+	                       1.75 (1x)
+	                       1.9 (1x)
+	                       1.6 (1x)
+
+  4. "member"
+
+	Type of data:          Boolean
+	Contains null values:  False
+	Non-null values:       8
+	Unique values:         2
+	Most common values:    True (4x)
+	                       False (4x)
+
+  5. "joined"
+
+	Type of data:          Date
+	Contains null values:  False
+	Non-null values:       8
+	Unique values:         8
+	Smallest value:        2016-12-31
+	Largest value:         2023-02-28
+	Most common values:    2019-03-14 (1x)
+	                       2021-07-01 (1x)
+	                       2018-11-23 (1x)
+	                       2020-01-05 (1x)
+	                       2022-05-30 (1x)
+
+  6. "last_login"
+
+	Type of data:          DateTime
+	Contains null values:  True (excluded from calculations)
+	Non-null values:       7
+	Unique values:         7
+	Smallest value:        2026-09-29T19:30:00
+	Largest value:         2026-10-03T23:59:59
+	Most common values:    2026-10-01T08:15:00 (1x)
+	                       2026-09-30T22:05:10 (1x)
+	                       2026-10-02T12:00:00 (1x)
+	                       2026-10-02T00:00:00 (1x)
+	                       2026-10-03T07:45:00 (1x)
+
+  7. "city"
+
+	Type of data:          Text
+	Contains null values:  False
+	Non-null values:       8
+	Unique values:         5
+	Longest value:         12 characters
+	Most common values:    Lisbon (4x)
+	                       Porto, Norte (1x)
+	                       Faro (1x)
+	                       Coimbra (1x)
+	                       Braga (1x)
+
+  8. "score"
+
+	Type of data:          Number
+	Contains null values:  True (excluded from calculations)
+	Non-null values:       7
+	Unique values:         6
+	Smallest value:        -35.25
+	Largest value:         2,400
+	Sum:                   7,190.375
+	Mean:                  1,027.196
+	Median:                980
+	StDev:                 734.648
+	Most decimal places:   3
+	Most common values:    980 (2x)
+	                       1,250.5 (1x)
+	                       2,400 (1x)
+	                       -35.25 (1x)
+	                       1,000 (1x)
+
+Row count: 8

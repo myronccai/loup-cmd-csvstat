@@ -1,0 +1,92 @@
+@mode(host.scripted)
+
+# csvstat's --json output: one object per column with csvkit's keys.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/report_test.lpscr imports it
+# under Stage0's test runner. The document is built from `Any` values for
+# system.json's stringify; the program also imports data.csv, whose `parse`
+# would shadow system.json's, so this module only writes JSON.
+
+from system.json import (stringify, stringifyIndented);
+from core.math import (round, floor, abs);
+from .infer import (Cell, type_name);
+from .stats import (ColumnStats);
+
+# Rounded like the other reports (three decimals), and written as an
+# integer when it is whole: `55` rather than `55.0`.
+func json_number(x: float): Any {
+    let r = round(x * 1000.0) / 1000.0;
+    if (r == floor(r) and abs(r) < 1.0e15) {
+        return r as int;
+    }
+    return r;
+}
+
+func json_cell(c: Cell): Any {
+    match c {
+        Cell.Null => { return None; },
+        Cell.Flag(on) => { return on; },
+        Cell.Num(value, _) => { return json_number(value); },
+        Cell.Day(_, iso) => { return iso; },
+        Cell.Moment(_, iso) => { return iso; },
+        Cell.Str(text) => { return text; },
+    }
+}
+
+func json_option_cell(c: Option[Cell]): Any {
+    return match c {
+        Some(cell) => json_cell(cell),
+        None => None,
+    };
+}
+
+func json_option_number(x: Option[float]): Any {
+    return match x {
+        Some(v) => json_number(v),
+        None => None,
+    };
+}
+
+func json_option_int(x: Option[int]): Any {
+    return match x {
+        Some(n) => n,
+        None => None,
+    };
+}
+
+func column_object(s: ColumnStats): dict[string, Any] {
+    var doc: dict[string, Any] = {};
+    doc["column_id"] = s.id;
+    doc["column_name"] = s.name;
+    doc["type"] = type_name(s.kind);
+    doc["nulls"] = s.nulls > 0;
+    doc["nonnulls"] = s.nonnulls;
+    doc["unique"] = s.distinct;
+    doc["min"] = json_option_cell(s.min);
+    doc["max"] = json_option_cell(s.max);
+    doc["sum"] = json_option_number(s.sum);
+    doc["mean"] = json_option_number(s.mean);
+    doc["median"] = json_option_number(s.median);
+    doc["stdev"] = json_option_number(s.stdev);
+    doc["len"] = json_option_int(s.longest);
+    doc["maxprecision"] = json_option_int(s.places);
+    var freq: list[Any] = [];
+    for (pair in s.freq) {
+        var entry: dict[string, Any] = {};
+        entry["value"] = json_cell(pair.0);
+        entry["count"] = pair.1;
+        freq.push(entry);
+    }
+    doc["freq"] = freq;
+    return doc;
+}
+
+pub func render_json(columns: list[ColumnStats], indent: int): string {
+    var docs: list[Any] = [];
+    for (s in columns) {
+        docs.push(column_object(s));
+    }
+    let text = if (indent == 0) { stringify(docs) } else { stringifyIndented(docs, indent) };
+    return text + "\n";
+}

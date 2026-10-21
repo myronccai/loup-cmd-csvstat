@@ -1,0 +1,85 @@
+@mode(host.scripted)
+
+# csvstat's diagnostics on standard error: warnings always, progress with
+# -v, a line per column with -vv.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; lib/reader.lpscr takes a Console as a
+# parameter, and the unit tests pass it a quiet one.
+#
+# The standard library's loup.log would fit, but Stage0's `check` (`make
+# check`) cannot resolve a `loup.*` import in 1.26 (E-CHECK-DEP: module
+# 'loup/log' not found), and it prints to standard output, where log lines
+# would mix with the report. This is the small part of it csvstat needs.
+
+from .appinfo import (APP_NAME);
+
+# Severities, least severe first; a message is printed when its level is at
+# least the console's threshold.
+pub enum Level {
+    Debug,
+    Info,
+    Warn,
+    Off,
+}
+
+func rank(level: Level): int {
+    return match level {
+        Level.Debug => 0,
+        Level.Info => 1,
+        Level.Warn => 2,
+        Level.Off => 3,
+    };
+}
+
+func word(level: Level): string {
+    return match level {
+        Level.Debug => "debug",
+        Level.Info => "info",
+        Level.Warn => "warning",
+        Level.Off => "",
+    };
+}
+
+pub class Console {
+    pub let name: string;
+    pub let threshold: Level;
+
+    pub func enabled(level: Level): bool {
+        return rank(level) >= rank(this.threshold) and rank(level) < rank(Level.Off);
+    }
+
+    # `csvstat: warning: data.csv:7: ...`, `csvstat: info: ...`.
+    pub func log(level: Level, msg: string): void {
+        if (this.enabled(level)) {
+            printErr(this.name + ": " + word(level) + ": " + msg);
+        }
+    }
+
+    pub func warn(msg: string): void {
+        this.log(Level.Warn, msg);
+    }
+
+    pub func info(msg: string): void {
+        this.log(Level.Info, msg);
+    }
+
+    pub func debug(msg: string): void {
+        this.log(Level.Debug, msg);
+    }
+}
+
+# Warnings always; -v adds the info lines, -vv the debug lines.
+pub func make_console(verbosity: int): Console {
+    let threshold = match verbosity {
+        0 => Level.Warn,
+        1 => Level.Info,
+        _ => Level.Debug,
+    };
+    return Console(name = APP_NAME, threshold = threshold);
+}
+
+# A console that prints nothing, for tests.
+pub func quiet_console(): Console {
+    return Console(name = APP_NAME, threshold = Level.Off);
+}

@@ -1,0 +1,145 @@
+@mode(host.scripted)
+
+# csvstat's statistics: describe() turns a column's cells into a
+# ColumnStats value; the generic helpers below do the counting.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/stats_test.lpscr imports it
+# under Stage0's test runner.
+
+from system.collections import (filter, filterMap, map, groupBy, toEntries, sortByDesc, minBy, maxBy, max, sumFloat);
+from core.math import (sqrt);
+from .infer import (ColumnType, Cell, is_value, sort_key, identity);
+
+pub struct ColumnStats {
+    # 1-based position in the input, as csvkit numbers columns.
+    pub id: int;
+    pub name: string;
+    pub kind: ColumnType;
+    pub nulls: int;
+    pub nonnulls: int;
+    pub distinct: int;
+    # None where the statistic does not apply to the column's type, or
+    # there are too few values.
+    pub min: Option[Cell];
+    pub max: Option[Cell];
+    pub sum: Option[float];
+    pub mean: Option[float];
+    pub median: Option[float];
+    pub stdev: Option[float];
+    pub longest: Option[int];
+    pub places: Option[int];
+    # The most common values, most frequent first, with their counts.
+    pub freq: list[(Cell, int)];
+}
+
+# Every distinct value of `xs` (as told apart by `key`) with the number of
+# times it occurs, most frequent first. sortByDesc is stable, and groupBy
+# keeps keys in order of first appearance, so equal counts stay in the
+# order the values first appear. The first element of each group stands for
+# the group.
+pub func tally[T](xs: list[T], key: fn(T): string): list[(T, int)] {
+    let groups = groupBy(xs, key);
+    let counted: list[(T, int)] = [(entry.1[0], entry.1.len()) for entry in toEntries(groups)];
+    return sortByDesc(counted, func(pair: (T, int)): int { return pair.1; });
+}
+
+# The smallest and the largest element by `key`, or None for an empty list.
+# The first of several equal elements wins.
+pub func extremes[T](xs: list[T], key: fn(T): float): Option[(T, T)] {
+    let low = minBy(xs, key);
+    let high = maxBy(xs, key);
+    if (low.is_none() or high.is_none()) {
+        return None;
+    }
+    return Some((low.unwrap(), high.unwrap()));
+}
+
+# The middle value, or the mean of the two middle values.
+pub func median(xs: list[float]): Option[float] {
+    if (xs.len() == 0) {
+        return None;
+    }
+    var sorted: list[float] = [];
+    for (x in xs) {
+        sorted.push(x);
+    }
+    sorted.sort(func(a: float, b: float): int {
+        return if (a < b) { -1 } else if (a > b) { 1 } else { 0 };
+    });
+    let mid = sorted.len() / 2;
+    if (sorted.len() % 2 == 1) {
+        return Some(sorted[mid]);
+    }
+    return Some((sorted[mid - 1] + sorted[mid]) / 2.0);
+}
+
+pub func mean(xs: list[float]): Option[float] {
+    if (xs.len() == 0) {
+        return None;
+    }
+    return Some(sumFloat(xs) / (xs.len() as float));
+}
+
+# The sample standard deviation (divided by n - 1), as agate's StDev.
+pub func sample_stdev(xs: list[float]): Option[float] {
+    if (xs.len() < 2) {
+        return None;
+    }
+    let m = mean(xs).unwrap();
+    let squares = map(xs, func(x: float): float { return (x - m) * (x - m); });
+    return Some(sqrt(sumFloat(squares) / ((xs.len() - 1) as float)));
+}
+
+# The statistics of one column. `cells` are the column's values as
+# infer_column made them, nulls included.
+pub func describe(id: int, name: string, kind: ColumnType, cells: list[Cell], freq_count: int): ColumnStats {
+    let present = filter(cells, is_value);
+    let counts = tally(present, identity);
+    let ordered = kind == ColumnType.Number or kind == ColumnType.Date or kind == ColumnType.DateTime;
+    let numeric = kind == ColumnType.Number;
+
+    let range = extremes(present, sort_key);
+    let numbers: list[float] = filterMap(present, func(c: Cell): Option[float] {
+        return match c {
+            Cell.Num(value, _) => Some(value),
+            _ => None,
+        };
+    });
+    let written: list[int] = map(present, func(c: Cell): int {
+        return match c {
+            Cell.Num(_, places) => places,
+            _ => 0,
+        };
+    });
+    let texts: list[string] = map(present, func(c: Cell): string {
+        return match c {
+            Cell.Str(text) => text,
+            _ => "",
+        };
+    });
+    let most_places = max(written);
+    let widest = maxBy(texts, func(s: string) => s.len());
+
+    let sum: Option[float] = if (numbers.len() > 0) { Some(sumFloat(numbers)) } else { None };
+    # Only text has a length worth reporting; csvkit gives it in characters.
+    let longest: Option[int] = if (kind == ColumnType.Text) { widest.map(func(s: string) => s.len()) } else { None };
+
+    return ColumnStats(
+        id = id,
+        name = name,
+        kind = kind,
+        nulls = cells.len() - present.len(),
+        nonnulls = present.len(),
+        distinct = counts.len(),
+        min = if (ordered) { range.map(func(pair: (Cell, Cell)): Cell { return pair.0; }) } else { None },
+        max = if (ordered) { range.map(func(pair: (Cell, Cell)): Cell { return pair.1; }) } else { None },
+        sum = sum,
+        mean = mean(numbers),
+        median = median(numbers),
+        stdev = sample_stdev(numbers),
+        longest = longest,
+        places = if (numeric) { most_places } else { None },
+        freq = counts.slice(0, if (counts.len() < freq_count) { counts.len() } else { freq_count }),
+    );
+}

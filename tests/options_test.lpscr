@@ -1,0 +1,132 @@
+@mode(host.scripted)
+
+# Unit tests for csvstat's command-line parser (lib/options.lpscr):
+# defaults, short and long options, prefixes, `--`, values and usage errors.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports
+# (`from ..lib.options`). It is not part of the program.
+
+from debug.assert import (expect, expectEq);
+from ..lib.options import (Options, parse_args, parse_count, find_long);
+
+func ok(argv: list[string]): Options {
+    return parse_args(argv).unwrap();
+}
+
+func err(argv: list[string]): string {
+    return match parse_args(argv) {
+        Ok(_) => "parsed",
+        Err(msg) => msg,
+    };
+}
+
+func test_defaults(): void {
+    let o = ok([]);
+    expectEq(o.delimiter, ",", "delimiter");
+    expectEq(o.output, "text", "output");
+    expectEq(o.only, "", "no single statistic");
+    expectEq(o.freq_count, 5, "freq count");
+    expectEq(o.indent, 2, "indent");
+    expectEq(o.skip_lines, 0, "skip lines");
+    expectEq(o.verbosity, 0, "verbosity");
+    expect(o.grouping and !o.no_header and !o.blanks and !o.no_inference and !o.names_only, "flags");
+    expectEq(o.file, "-", "standard input");
+}
+
+func test_short_options_combine_and_take_values(): void {
+    let o = ok(["-tHGvv", "-K2", "-c", "name,3", "data.tsv"]);
+    expectEq(o.delimiter, "\t", "-t");
+    expect(o.no_header, "-H");
+    expect(!o.grouping, "-G");
+    expectEq(o.verbosity, 2, "-vv");
+    expectEq(o.skip_lines, 2, "attached value");
+    expectEq(o.columns, "name,3", "separate value");
+    expectEq(o.file, "data.tsv", "file");
+}
+
+func test_attached_delimiter(): void {
+    expectEq(ok(["-d;"]).delimiter, ";", "-d;");
+    expectEq(ok(["-d", "|"]).delimiter, "|", "-d |");
+    expectEq(ok(["--delimiter=:"]).delimiter, ":", "--delimiter=:");
+}
+
+func test_long_options(): void {
+    let o = ok(["--columns=age", "--not-columns", "2", "--null-value", "-", "--null-value=?", "--blanks", "--no-inference", "--freq-count", "3", "--indent=4", "--json"]);
+    expectEq(o.columns, "age", "columns");
+    expectEq(o.not_columns, "2", "not columns");
+    expectEq(o.null_values.join("|"), "-|?", "null values accumulate");
+    expect(o.blanks and o.no_inference, "flags");
+    expectEq(o.freq_count, 3, "freq count");
+    expectEq(o.indent, 4, "indent");
+    expectEq(o.output, "json", "output");
+}
+
+func test_unambiguous_prefixes(): void {
+    expect(ok(["--no-header"]).no_header, "--no-header");
+    expectEq(ok(["--tab"]).delimiter, "\t", "--tab");
+    expectEq(ok(["--mea"]).only, "mean", "--mea");
+    expectEq(ok(["--med"]).only, "median", "--med");
+}
+
+func test_ambiguous_prefix(): void {
+    expectEq(err(["--me"]), "option '--me' is ambiguous; possibilities: '--mean' '--median'", "--me");
+    expectEq(err(["--n"]), "option '--n' is ambiguous; possibilities: '--no-header-row' '--null-value' '--no-inference' '--not-columns' '--names' '--nulls' '--non-nulls' '--no-grouping-separator'", "--n");
+    expect(find_long("--max").is_ok(), "an exact name wins over a longer one (--max-precision)");
+}
+
+func test_statistics_and_outputs(): void {
+    expectEq(ok(["--non-nulls"]).only, "nonnulls", "--non-nulls");
+    expectEq(ok(["--max-precision"]).only, "maxprecision", "--max-precision");
+    expectEq(ok(["--count"]).only, "count", "--count");
+    expectEq(ok(["--look"]).output, "look", "--look");
+    expectEq(ok(["--csv", "--csv"]).output, "csv", "repeated mode");
+    expectEq(ok(["--mean", "--mean"]).only, "mean", "repeated statistic");
+}
+
+func test_options_after_file_and_double_dash(): void {
+    let o = ok(["data.csv", "--csv"]);
+    expectEq(o.output, "csv", "option after the file");
+    expectEq(ok(["--", "-n"]).file, "-n", "-- makes -n a file");
+    expect(!ok(["--", "-n"]).names_only, "-n after -- is not --names");
+    expectEq(err(["a.csv", "--", "-n"]), "extra operand '-n'", "a second file");
+    expectEq(ok(["-"]).file, "-", "dash");
+}
+
+func test_help_and_version(): void {
+    expect(ok(["-h"]).help, "-h");
+    expect(ok(["--help"]).help, "--help");
+    expect(ok(["-V"]).version, "-V");
+    expect(ok(["--version"]).version, "--version");
+}
+
+func test_usage_errors(): void {
+    expectEq(err(["--bogus"]), "unrecognized option '--bogus'", "unknown long");
+    expectEq(err(["-x"]), "invalid option -- 'x'", "unknown short");
+    expectEq(err(["-c"]), "option requires an argument -- 'c'", "missing short value");
+    expectEq(err(["--columns"]), "option '--columns' requires an argument", "missing long value");
+    expectEq(err(["--csv=yes"]), "option '--csv' doesn't allow an argument", "flag with value");
+    expectEq(err(["-d", "ab"]), "the delimiter must be a single character, not 'ab'", "long delimiter");
+    expectEq(err(["-d", "\""]), "the delimiter cannot be a quote or a line break", "quote delimiter");
+    expectEq(err(["-K", "x"]), "invalid --skip-lines value 'x'", "skip lines");
+    expectEq(err(["--freq-count", "0"]), "invalid --freq-count value '0'", "freq count");
+    expectEq(err(["--indent", "-1"]), "invalid --indent value '-1'", "indent");
+    expectEq(err(["-c", " "]), "the --columns list is empty", "empty list");
+    expectEq(err(["a.csv", "b.csv"]), "extra operand 'b.csv'", "two files");
+}
+
+func test_conflicts(): void {
+    expectEq(err(["--csv", "--json"]), "--csv and --json cannot be combined", "two outputs");
+    expectEq(err(["--mean", "--max"]), "only one statistic may be given (--mean, --max)", "two statistics");
+    expectEq(err(["--look", "--sum"]), "--sum cannot be combined with --look", "statistic and output");
+}
+
+func test_parse_count(): void {
+    expectEq(parse_count("12", 0).unwrap_or(-1), 12, "digits");
+    expectEq(parse_count("0", 0).unwrap_or(-1), 0, "zero allowed");
+    expect(parse_count("0", 1).is_none(), "below the least");
+    expect(parse_count("+3", 0).is_none(), "sign");
+    expect(parse_count("", 0).is_none(), "empty");
+    expect(parse_count("1234567890", 0).is_none(), "too long");
+}

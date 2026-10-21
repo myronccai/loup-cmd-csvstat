@@ -1,0 +1,22 @@
+# Tasks: csvstat
+
+- [x] 1. Layout: `bin/csvstat.lpscr` entry script, `lib/` modules with relative imports, manifest entry and test pattern for scripts, Makefile without a build target, CI
+  - _Requirements: all_
+- [x] 2. Read files and standard input; split the text into records with their line numbers; parse each with `data.csv`; report stray and unterminated quotes
+  - _Requirements: 1.1, 1.2, 1.3, 1.9, 1.10_
+- [x] 3. Header handling: `-H` letter names, empty and repeated names, `-K`, byte order mark, blank lines, short and long records
+  - _Requirements: 1.4, 1.5, 1.6, 1.7, 1.8_
+- [x] 4. Null words, `--null-value`, `--blanks`; one parser per type; inference in order with `-I`
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7_
+- [x] 5. Statistics per column: counts, distinct values, range, sum, mean, median, sample standard deviation, decimal places, longest text, most common values
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+- [x] 6. Number formatting with three decimals and thousands separators, `-G`
+  - _Requirements: 3.6_
+- [x] 7. Column selection with names, indexes and ranges; csvkit's messages; `-n`
+  - _Requirements: 4.1, 4.2, 4.3, 4.4_
+- [x] 8. Text report, single statistics, `--count`, the CSV and look tables, JSON with `--indent`
+  - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6_
+- [x] 9. Options, prefixes, conflicts, usage errors, help, version, `-v`/`-vv`, exit statuses
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+- [x] 10. Unit tests, fixtures with expected reports, end-to-end tests with `loup run`
+  - _Requirements: all_

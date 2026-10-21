@@ -1,0 +1,106 @@
+@mode(host.scripted)
+
+# csvstat's column selection: resolves the -c and -C lists against the
+# header, with csvkit's rules and messages.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/columns_test.lpscr imports it
+# under Stage0's test runner.
+#
+# A LIST is comma-separated. Each item is a column name, a 1-based index
+# (an item made only of digits is always an index, as in csvkit), or a
+# range `N-M` / `N:M` (both ends included) whose ends may be left out
+# (`3-` is the third column to the last, `-2` the first two).
+
+from system.collections import (all, rangeFrom, filter);
+
+func is_digits(s: string): bool {
+    return s.len() > 0 and all(s.chars(), func(c: string) => c >= "0" and c <= "9");
+}
+
+func quoted_names(names: list[string]): string {
+    let quoted: list[string] = ["'" + n + "'" for n in names];
+    return quoted.join(", ");
+}
+
+# The 0-based index of one name or 1-based number.
+pub func match_column(names: list[string], item: string): Result[int, string] {
+    if (!is_digits(item) and names.contains(item)) {
+        return Ok(names.index_of(item));
+    }
+    if (!is_digits(item)) {
+        return Err(i"Column '{$ item $}' is invalid. It is neither an integer nor a column name. Column names are: {$ quoted_names(names) $}");
+    }
+    let n = item.toInt();
+    if (n < 1) {
+        return Err(i"Column {$ n $} is invalid. Columns are 1-based.");
+    }
+    if (n > names.len()) {
+        return Err(i"Column {$ n $} is invalid. The last column is '{$ names[-1] $}' at index {$ names.len() $}.");
+    }
+    return Ok(n - 1);
+}
+
+# The 1-based ends of a range item, or None when the item is not a range.
+func range_ends(item: string, count: int): Option[(int, int)] {
+    let colon = item.index_of(":");
+    let at = if (colon >= 0) { colon } else { item.index_of("-") };
+    if (at < 0) {
+        return None;
+    }
+    let first = item.slice(0, at);
+    let last = item.slice(at + 1);
+    if ((first != "" and !is_digits(first)) or (last != "" and !is_digits(last))) {
+        return None;
+    }
+    let lo = if (first == "") { 1 } else { first.toInt() };
+    let hi = if (last == "") { count } else { last.toInt() };
+    return Some((lo, hi));
+}
+
+# Every column an identifier list names, in the order named.
+pub func parse_identifiers(names: list[string], list_text: string): Result[list[int], string] {
+    var picked: list[int] = [];
+    for (raw in list_text.split(",")) {
+        let item = raw.trim();
+        if (item == "") {
+            continue;
+        }
+        match match_column(names, item) {
+            Ok(index) => {
+                picked.push(index);
+                continue;
+            },
+            Err(message) => {
+                # Not a name or a number: maybe a range, else the error
+                # stands.
+                match range_ends(item, names.len()) {
+                    Some(ends) => {
+                        let (lo, hi) = ends;
+                        for (n in rangeFrom(lo, hi + 1)) {
+                            picked.push(match_column(names, str(n))?);
+                        }
+                    },
+                    None => {
+                        if (item.contains("-") or item.contains(":")) {
+                            return Err(i"Invalid range '{$ item $}'. Ranges must be two integers separated by a - or : character.");
+                        }
+                        return Err(message);
+                    },
+                }
+            },
+        }
+    }
+    return Ok(picked);
+}
+
+# The columns to describe: those of `include` (all when it is empty) less
+# those of `exclude`.
+pub func select_columns(names: list[string], include: string, exclude: string): Result[list[int], string] {
+    let chosen = if (include == "") { rangeFrom(0, names.len()) } else { parse_identifiers(names, include)? };
+    if (exclude == "") {
+        return Ok(chosen);
+    }
+    let dropped = parse_identifiers(names, exclude)?;
+    return Ok(filter(chosen, func(k: int) => !dropped.contains(k)));
+}

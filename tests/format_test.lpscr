@@ -1,0 +1,42 @@
+@mode(host.scripted)
+
+# Unit tests for csvstat's formatting (lib/format.lpscr): digit grouping,
+# rounding to three decimals and how each kind of cell is shown.
+#
+# Runtime: host.scripted, run by the test runner: `make test` interprets
+# this file with Stage0 (`loup-bootstrap test --no-parallel --file`), one
+# test per `func test_*()`. It imports lib/ with relative imports. It is not
+# part of the program.
+
+from debug.assert import (expectEq);
+from ..lib.infer import (Cell, parse_date);
+from ..lib.format import (group_digits, format_number, show_cell);
+
+func test_group_digits(): void {
+    expectEq(group_digits("7"), "7", "one digit");
+    expectEq(group_digits("123"), "123", "three");
+    expectEq(group_digits("1234"), "1,234", "four");
+    expectEq(group_digits("1234567"), "1,234,567", "seven");
+    expectEq(group_digits("123456"), "123,456", "six");
+}
+
+func test_format_number(): void {
+    expectEq(format_number(0.0), "0", "zero");
+    expectEq(format_number(33.75), "33.75", "two decimals");
+    expectEq(format_number(8.015609), "8.016", "rounded to three");
+    expectEq(format_number(2.0625), "2.063", "half away from zero");
+    expectEq(format_number(1.0 / 3.0), "0.333", "a third");
+    expectEq(format_number(1999000.0), "1,999,000", "grouped");
+    expectEq(format_number(-1234.5), "-1,234.5", "negative");
+    expectEq(format_number(-0.0004), "0", "rounds to an unsigned zero");
+    expectEq(format_number(1234.5, grouping = false), "1234.5", "no grouping");
+}
+
+func test_show_cell(): void {
+    expectEq(show_cell(Cell.Null), "", "null");
+    expectEq(show_cell(Cell.Flag(false)), "False", "boolean");
+    expectEq(show_cell(Cell.Num(12500.25, 2)), "12,500.25", "number");
+    expectEq(show_cell(Cell.Num(12500.25, 2), grouping = false), "12500.25", "number without grouping");
+    expectEq(show_cell(parse_date("2026-07-04").unwrap()), "2026-07-04", "date");
+    expectEq(show_cell(Cell.Str("as is ")), "as is ", "text");
+}

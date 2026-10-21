@@ -1,0 +1,298 @@
+@mode(host.scripted)
+
+# csvstat's type inference: which values are null, what each column holds,
+# and the typed Cell every raw value becomes.
+#
+# Runtime: host.scripted. A module of the script bin/csvstat.lpscr,
+# interpreted with it by `loup run`; tests/infer_test.lpscr imports it
+# under Stage0's test runner.
+#
+# Structure: the null set, one parser per type (each returns None for a
+# value it does not accept), then infer_column, which tries the types in
+# order and keeps the first that accepts the whole column.
+
+from system.collections import (all, countWhere);
+from system.text import (parseFloat);
+import core.datetime as cal;
+
+pub enum ColumnType {
+    Boolean,
+    Number,
+    Date,
+    DateTime,
+    Text,
+}
+
+# A raw value converted to its column's type. Dates keep their day number
+# (and date-times their milliseconds) for ordering, and the ISO text for
+# display.
+pub enum Cell {
+    Null,
+    Flag(on: bool),
+    Num(value: float, places: int),
+    Day(days: int, iso: string),
+    Moment(millis: int, iso: string),
+    Str(text: string),
+}
+
+pub func type_name(kind: ColumnType): string {
+    return match kind {
+        ColumnType.Boolean => "Boolean",
+        ColumnType.Number => "Number",
+        ColumnType.Date => "Date",
+        ColumnType.DateTime => "DateTime",
+        ColumnType.Text => "Text",
+    };
+}
+
+# ---------------------------------------------------------------------------
+# Nulls
+# ---------------------------------------------------------------------------
+
+pub let DEFAULT_NULLS: list[string] = ["", "na", "n/a", "none", "null", "."];
+
+# The strings that count as null, lower-cased: agate's defaults unless
+# --blanks, plus every --null-value.
+pub func null_set(extra: list[string], blanks: bool): set[string] {
+    var nulls: set[string] = set[string]();
+    if (!blanks) {
+        for (word in DEFAULT_NULLS) {
+            nulls.add(word);
+        }
+    }
+    for (word in extra) {
+        nulls.add(word.trim().toLowerCase());
+    }
+    return nulls;
+}
+
+pub func is_null(raw: string, nulls: set[string]): bool {
+    return nulls.contains(raw.trim().toLowerCase());
+}
+
+# ---------------------------------------------------------------------------
+# One parser per type
+# ---------------------------------------------------------------------------
+
+let TRUE_WORDS: list[string] = ["true", "yes", "t", "y"];
+let FALSE_WORDS: list[string] = ["false", "no", "f", "n"];
+
+pub func parse_bool(raw: string): Option[bool] {
+    let word = raw.trim().toLowerCase();
+    if (TRUE_WORDS.contains(word)) {
+        return Some(true);
+    }
+    if (FALSE_WORDS.contains(word)) {
+        return Some(false);
+    }
+    return None;
+}
+
+func all_digits(s: string): bool {
+    return all(s.chars(), func(c: string) => c >= "0" and c <= "9");
+}
+
+# The digits before the point: plain, or grouped by commas in threes
+# ("1,234,567"). Empty is allowed here (".5"); the caller checks that the
+# number has a digit somewhere.
+func whole_part_ok(whole: string): bool {
+    if (!whole.contains(",")) {
+        return all_digits(whole);
+    }
+    let groups = whole.split(",");
+    let head = groups[0];
+    if (head.len() < 1 or head.len() > 3 or !all_digits(head)) {
+        return false;
+    }
+    return all(groups.slice(1), func(g: string) => g.len() == 3 and all_digits(g));
+}
+
+const CURRENCY_SIGNS: string = "$€£¥";
+
+# A number as written in data files: an optional sign, an optional currency
+# sign, digits with optional thousands separators, an optional fraction and
+# exponent. The text is checked here and converted by system.text's
+# parseFloat, which on its own would also take "inf" and "NaN". Returns the
+# value and the number of decimal places written.
+pub func parse_number(raw: string): Option[(float, int)] {
+    var s = raw.trim();
+    var sign = "";
+    if (s.startsWith("-") or s.startsWith("+")) {
+        sign = s.slice(0, 1);
+        s = s.slice(1);
+    }
+    if (s.len() > 0 and CURRENCY_SIGNS.contains(s.slice(0, 1))) {
+        s = s.slice(1);
+    }
+    var mantissa = s;
+    var exponent = "";
+    let e = if (s.index_of("e") >= 0) { s.index_of("e") } else { s.index_of("E") };
+    if (e >= 0) {
+        mantissa = s.slice(0, e);
+        exponent = s.slice(e + 1);
+        let digits = if (exponent.startsWith("-") or exponent.startsWith("+")) { exponent.slice(1) } else { exponent };
+        if (digits == "" or !all_digits(digits)) {
+            return None;
+        }
+    }
+    let dot = mantissa.index_of(".");
+    let whole = if (dot >= 0) { mantissa.slice(0, dot) } else { mantissa };
+    let fraction = if (dot >= 0) { mantissa.slice(dot + 1) } else { "" };
+    if (whole == "" and fraction == "") {
+        return None;
+    }
+    if (!whole_part_ok(whole) or !all_digits(fraction)) {
+        return None;
+    }
+    var cleaned = sign + whole.replace(",", "");
+    if (fraction != "") {
+        cleaned += "." + fraction;
+    }
+    if (exponent != "") {
+        cleaned += "e" + exponent;
+    }
+    return match parseFloat(cleaned) {
+        Ok(value) => Some((value, fraction.len())),
+        Err(_) => None,
+    };
+}
+
+# "YYYY-MM-DD" shape, checked before core.datetime is asked, so that most
+# non-dates are turned down without an exception.
+func looks_like_date(s: string): bool {
+    return s.len() == 10 and s.slice(4, 5) == "-" and s.slice(7, 8) == "-";
+}
+
+pub func parse_date(raw: string): Option[Cell] {
+    let s = raw.trim();
+    if (!looks_like_date(s)) {
+        return None;
+    }
+    # Date.fromIsoformat validates the calendar (no 2026-02-30) and throws
+    # ValueError otherwise.
+    try {
+        let day = cal.Date.fromIsoformat(s);
+        return Some(Cell.Day(days = day.toOrdinalDays(), iso = day.isoformat()));
+    } catch (ValueError as e) {
+        return None;
+    }
+}
+
+const MILLIS_PER_DAY: int = 86_400_000;
+
+# A date, or a date and a time of day: "2026-10-20", "2026-10-20 14:30",
+# "2026-10-20T14:30:05.250Z". Times are taken as written (no zones).
+pub func parse_datetime(raw: string): Option[Cell] {
+    var s = raw.trim();
+    if (s.endsWith("Z")) {
+        s = s.slice(0, s.len() - 1);
+    }
+    if (s.len() < 10 or !looks_like_date(s.slice(0, 10))) {
+        return None;
+    }
+    var clock = "00:00:00";
+    if (s.len() > 10) {
+        let sep = s.slice(10, 11);
+        if (sep != "T" and sep != " ") {
+            return None;
+        }
+        clock = s.slice(11);
+        if (clock.len() == 5) {
+            clock += ":00";
+        }
+    }
+    try {
+        let day = cal.Date.fromIsoformat(s.slice(0, 10));
+        let time = cal.Time.fromIsoformat(clock);
+        let stamp = cal.DateTime.newNaive(day, time);
+        let millis = day.toOrdinalDays() * MILLIS_PER_DAY + time.toNanosOfDay() / 1_000_000;
+        return Some(Cell.Moment(millis = millis, iso = stamp.isoformat()));
+    } catch (ValueError as e) {
+        return None;
+    }
+}
+
+# The cell for a non-null value of a column of type `kind`, or None when the
+# value does not fit the type.
+pub func parse_as(kind: ColumnType, raw: string): Option[Cell] {
+    match kind {
+        # Inside a lambda (and a comprehension) the payloads are given by
+        # position: in 1.26 both interpreters fail on `Cell.Num(value = ...)`
+        # there once any function in the program declares a `var value`.
+        ColumnType.Boolean => {
+            return parse_bool(raw).map(func(on: bool): Cell { return Cell.Flag(on); });
+        },
+        ColumnType.Number => {
+            return parse_number(raw).map(func(n: (float, int)): Cell { return Cell.Num(n.0, n.1); });
+        },
+        ColumnType.Date => { return parse_date(raw); },
+        ColumnType.DateTime => { return parse_datetime(raw); },
+        ColumnType.Text => { return Some(Cell.Str(text = raw)); },
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Inference
+# ---------------------------------------------------------------------------
+
+pub let TYPE_ORDER: list[ColumnType] = [ColumnType.Boolean, ColumnType.Number, ColumnType.Date, ColumnType.DateTime];
+
+# The column's type and its cells. Each candidate type converts the values
+# one by one; the first value it turns down moves on to the next candidate.
+# Text takes anything, so it is what is left; it is also the type of a
+# column with no values at all, and of every column with --no-inference.
+pub func infer_column(raw: list[string], nulls: set[string], inference: bool): (ColumnType, list[Cell]) {
+    let present = countWhere(raw, func(v: string) => !is_null(v, nulls));
+    if (inference and present > 0) {
+        candidates: for (kind in TYPE_ORDER) {
+            var cells: list[Cell] = [];
+            for (v in raw) {
+                if (is_null(v, nulls)) {
+                    cells.push(Cell.Null);
+                    continue;
+                }
+                match parse_as(kind, v) {
+                    Some(cell) => { cells.push(cell); },
+                    None => { continue candidates; },
+                }
+            }
+            return (kind, cells);
+        }
+    }
+    let texts: list[Cell] = [if (is_null(v, nulls)) { Cell.Null } else { Cell.Str(v) } for v in raw];
+    return (ColumnType.Text, texts);
+}
+
+# ---------------------------------------------------------------------------
+# Reading cells back
+# ---------------------------------------------------------------------------
+
+pub func is_value(c: Cell): bool {
+    return match c {
+        Cell.Null => false,
+        _ => true,
+    };
+}
+
+# The position of a cell on its column's scale, for min and max.
+pub func sort_key(c: Cell): float {
+    return match c {
+        Cell.Num(value, _) => value,
+        Cell.Day(days, _) => days as float,
+        Cell.Moment(millis, _) => millis as float,
+        _ => 0.0,
+    };
+}
+
+# Equal values get equal identities: "1.50" and "1.5" are one number, and
+# "Yes" and "TRUE" one boolean.
+pub func identity(c: Cell): string {
+    return match c {
+        Cell.Null => "",
+        Cell.Flag(on) => if (on) { "True" } else { "False" },
+        Cell.Num(value, _) => str(value),
+        Cell.Day(_, iso) => iso,
+        Cell.Moment(_, iso) => iso,
+        Cell.Str(text) => text,
+    };
+}
